@@ -13,7 +13,7 @@ def run_all():
     results = {"linear_regression": {}, "classification": {}}
 
     #1 ЛИНЕЙНАЯ РЕГРЕССЦИЯ
-    print("--- 1. ЛИНЕЙНАЯ РЕГРЕССИЯ (Student_Performance.csv) ---")
+    print("1 ЛИНЕЙНАЯ РЕГРЕССИЯ (Student_Performance.csv)")
     try:
         df_reg = pd.read_csv("Student_Performance.csv")
         
@@ -39,23 +39,46 @@ def run_all():
         print("Ошибка: Файл Student_Performance.csv не найден в папке!\n")
 
     #2 КЛАССИФИКАЦИЯ
-    print("2 КЛАССИФИКАЦИЯ (german.csv)")
+    print("\n2 КЛАССИФИКАЦИЯ (german.csv)")
     try:
-        df_cls = pd.read_csv("german.csv")
-        target_col = df_cls.columns[0]
-
-        #кодируем категориальные признаки (строки) в числа
+        df_cls = pd.read_csv("german.csv", sep=";")
+        
+        #ищем целевую колонку
+        target_col = None
+        for col in df_cls.columns:
+            if "credit" in str(col).lower():
+                target_col = col
+                break
+                
+        if target_col is None:
+            target_col = df_cls.columns[0]  # Если не нашли по имени, берем первую
+            
+        print(f"Целевая колонка: {target_col}")
+        
+        #кодируем категориальные признаки
         df_encoded = pd.get_dummies(df_cls, drop_first=True)
         
-        #восстанавливаем имя целевой колонки, так как после get_dummies оно могло измениться
-        true_target_col = [c for c in df_encoded.columns if target_col in c][0] 
+        #ищем закодированное имя целевой колонки (может измениться после get_dummies)
+        true_target_col = [c for c in df_encoded.columns if target_col in c][0]
         y_cls = df_encoded[true_target_col].values
+        
+        #проверяем тип данных и переводим в числа, если это строки
+        if y_cls.dtype == 'object' or y_cls.dtype == 'bool':
+            y_cls = pd.factorize(y_cls)[0]
+        elif y_cls.min() == 1:
+            y_cls = y_cls - 1
+        
+        #проверяем, что у нас два класса
+        unique_classes = np.unique(y_cls)
+        print(f"Уникальные классы в y: {unique_classes}")
+        if len(unique_classes) < 2:
+            raise ValueError("В данных только один класс! Проверьте CSV файл.")
         X_cls = df_encoded.drop(columns=[true_target_col]).values
         
-        #если таргет 1 и 2, приведем к 0 и 1
-        if y_cls.min() == 1:
-            y_cls = y_cls - 1 
-        Xc_train, Xc_test, yc_train, yc_test = train_test_split(X_cls, y_cls, test_size=0.2, random_state=42)
+        #делаем стратифицированное разбиение (чтобы классы были в тесте и трейне)
+        Xc_train, Xc_test, yc_train, yc_test = train_test_split(
+            X_cls, y_cls, test_size=0.2, random_state=42, stratify=y_cls
+        )
         
         #масштабирование
         scaler_cls = StandardScaler()
@@ -63,7 +86,7 @@ def run_all():
         Xc_test_scaled = scaler_cls.transform(Xc_test)
         cls_data = ClassificationInput(Xc_train_scaled, yc_train, Xc_test_scaled, yc_test, learning_rate=0.1, epochs=1000)
         
-        #2.1 твоя самописная модель
+        #2.1 самописная модель
         own_res = train_logistic_classifier(cls_data)
         results["classification"]["own_logistic"] = {
             "roc_auc": float(roc_auc_score(yc_test, own_res.probabilities)),
@@ -73,7 +96,7 @@ def run_all():
             "f1": float(f1_score(yc_test, own_res.predictions, zero_division=0))
         }
         
-        #готовые модели из sklearn
+        #2.2 готовые модели из sklearn
         baseline_res = compare_classical_models(cls_data)
         
         def metrics_to_dict(m):
@@ -83,15 +106,15 @@ def run_all():
         results["classification"]["decision_tree"] = metrics_to_dict(baseline_res.decision_tree)
         results["classification"]["knn"] = metrics_to_dict(baseline_res.knn)
         
-        #вывод для отчета
+        # Вывод для отчета
         print("Сравнение моделей (Метрика Accuracy):")
         print(f"  Своя логистическая: {results['classification']['own_logistic']['accuracy']:.4f}")
         print(f"  Sklearn Логистическая: {results['classification']['logistic_regression']['accuracy']:.4f}")
         print(f"  Дерево решений: {results['classification']['decision_tree']['accuracy']:.4f}")
         print(f"  KNN: {results['classification']['knn']['accuracy']:.4f}\n")
         
-    except FileNotFoundError:
-        print("Ошибка: Файл german.csv не найден в папке!\n")
+    except Exception as e:
+        print(f"Ошибка при обработке german.csv: {e}\n")
 
     #3 СОХРАНЕНИЕ В JSON
     with open("experiment_results.json", "w", encoding="utf-8") as f:
